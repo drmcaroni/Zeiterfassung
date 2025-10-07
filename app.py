@@ -183,12 +183,6 @@ if speichern:
         df_save.to_excel(DATEI_BUCHUNGEN, index=False)
         st.success(f"Buchung für **{projekt}** am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitraum}) gespeichert!")
 
-# --- Felder manuell löschen ---
-if loeschen:
-    st.session_state["instrument_field"] = ""
-    st.session_state["name_field"] = ""
-    st.rerun()
-
 # --- Übersicht ---
 st.subheader("📅 Aktuelle Buchungen")
 if not df_buch.empty:
