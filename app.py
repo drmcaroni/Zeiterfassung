@@ -152,15 +152,8 @@ zeit_start, zeit_ende = [s.strip() for s in zeitfenster_auswahl.split(" - ")]
 instrument = st.text_input("Instrument *", value=st.session_state["instrument_field"], key="instrument_field")
 name = st.text_input("Name *", value=st.session_state["name_field"], key="name_field")
 
-# --- Buttons ---
-col1, col2 = st.columns(2)
-with col1:
-    speichern = st.button("💾 Buchung speichern")
-with col2:
-    loeschen = st.button("🧹 Felder löschen")
-
 # --- Buchung speichern ---
-if speichern:
+if st.button("💾 Buchung speichern"):
     if not instrument.strip() or not name.strip():
         st.error("Bitte alle Pflichtfelder ausfüllen.")
     else:
