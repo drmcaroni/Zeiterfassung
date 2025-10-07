@@ -7,7 +7,7 @@ from datetime import datetime, date, time
 DATEI_VERFUEGBAR = "verfuegbare_zeiten.xlsx"
 DATEI_BUCHUNGEN = "buchungen.xlsx"
 
-# === Session-State-Initialisierung ===
+# === Session-State-Initialisierung (nur Default-Werte für Inputs) ===
 if "instrument_field" not in st.session_state:
     st.session_state["instrument_field"] = ""
 if "name_field" not in st.session_state:
@@ -31,18 +31,36 @@ if "Datum" in df_buch.columns:
     df_buch["Datum"] = pd.to_datetime(df_buch["Datum"], dayfirst=True, errors="coerce").dt.date
 
 # === Hilfsfunktionen ===
+def normalize_dash(s: str) -> str:
+    """Ersetzt verschiedene Gedankenstriche durch einfachen Bindestrich."""
+    return s.replace("–", "-").replace("—", "-")
+
 def parse_time(t):
-    """Konvertiert 'HH:MM' oder 'HH:MM Uhr' zu time-Objekt"""
+    """Konvertiert 'HH:MM' oder 'HH:MM Uhr' zu time-Objekt, sonst None"""
+    if t is None:
+        return None
     try:
         return datetime.strptime(t.strip().replace(" Uhr", ""), "%H:%M").time()
     except:
         return None
 
+def split_time_range(s: str):
+    """Teilt 'HH:MM - HH:MM' (auch mit verschiedenen Strichen) in zwei strings."""
+    if pd.isna(s):
+        return None, None
+    s2 = normalize_dash(str(s))
+    parts = s2.split("-")
+    if len(parts) < 2:
+        return None, None
+    return parts[0].strip(), parts[1].strip()
+
 def freie_zeitfenster(gesamt_start, gesamt_ende, buchungen):
-    """Berechnet freie Zeiträume innerhalb eines Gesamtzeitraums."""
+    """Berechnet freie Teilzeiträume innerhalb eines Gesamtzeitraums (buchungen = Liste von (time, time))."""
     freie = []
     start = gesamt_start
-    for b_start, b_ende in sorted(buchungen):
+    # sicherstellen, dass buchungen sortiert sind
+    buchungen_sorted = sorted(buchungen, key=lambda x: x[0])
+    for b_start, b_ende in buchungen_sorted:
         if b_start > start:
             freie.append((start, b_start))
         start = max(start, b_ende)
@@ -51,7 +69,7 @@ def freie_zeitfenster(gesamt_start, gesamt_ende, buchungen):
     return freie
 
 def format_date_for_excel(x):
-    """Formatiert Datum als 'TT.MM.JJJJ'."""
+    """Gibt Datum als 'TT.MM.JJJJ' zurück (oder unverändert, falls nicht parsebar)."""
     if isinstance(x, (datetime, date)):
         return x.strftime("%d.%m.%Y")
     try:
@@ -62,7 +80,7 @@ def format_date_for_excel(x):
     except:
         return x
 
-# === Benutzeroberfläche ===
+# === UI ===
 st.title("🎵 KUG Registerproben – Buchungssystem 2025/26")
 
 # Projektauswahl
@@ -73,79 +91,71 @@ if df_verf.empty:
 projekt = st.selectbox("Projekt auswählen:", sorted(df_verf["Projekt"].dropna().unique()))
 df_proj = df_verf[df_verf["Projekt"] == projekt].copy()
 
-# --- Freie Zeitfenster berechnen ---
-freie_tage = []
-for _, row in df_proj.iterrows():
-    datum = row["Datum"]
-    zeitraum = str(row["Zeitraum"])
-    if pd.isna(datum) or "-" not in zeitraum:
-        continue
-
-    try:
-        z_start, z_ende = [parse_time(x) for x in zeitraum.split("-")]
-        if z_start is None or z_ende is None:
-            continue
-    except:
-        continue
-
-    df_tag = df_buch[(df_buch["Projekt"] == projekt) & (df_buch["Datum"] == datum)]
-    buchungen = []
-    for z in df_tag["Zeitraum"].dropna().astype(str):
-        try:
-            b_start, b_ende = [parse_time(x) for x in z.split("-")]
-            if b_start and b_ende:
-                buchungen.append((b_start, b_ende))
-        except:
-            pass
-
-    freie_slots = freie_zeitfenster(z_start, z_ende, buchungen)
-    for fs in freie_slots:
-        diff_h = (datetime.combine(datetime.today(), fs[1]) -
-                  datetime.combine(datetime.today(), fs[0])).total_seconds() / 3600
-        if diff_h >= 3:
-            freie_tage.append({"Datum": datum, "Start": fs[0], "Ende": fs[1], "Projekt": projekt})
-
-if not freie_tage:
-    st.warning("Keine freien Zeitfenster für dieses Projekt.")
+if df_proj.empty:
+    st.warning("Keine verfügbaren Zeiten für dieses Projekt.")
     st.stop()
-
-df_frei = pd.DataFrame(freie_tage)
 
 # --- Datumsauswahl ---
 datum_auswahl = st.selectbox(
     "Datum auswählen:",
-    sorted(df_frei["Datum"].unique()),
+    sorted(df_proj["Datum"].unique()),
     format_func=lambda d: d.strftime("%d.%m.%Y")
 )
 
-slots = df_frei[df_frei["Datum"] == datum_auswahl]
-
-# --- Auswahl Tageszeitfenster ---
-slot = st.selectbox(
-    "Verfügbares Zeitfenster:",
-    slots.apply(lambda x: f"{x['Start'].strftime('%H:%M')} - {x['Ende'].strftime('%H:%M')}", axis=1)
-)
-
-# --- 3-Stunden-Zeitfenster generieren ---
-zeiten = pd.date_range("00:00", "23:45", freq="15min").strftime("%H:%M").tolist()
-slot_start_time, slot_end_time = [datetime.strptime(x, "%H:%M").time() for x in slot.split(" - ")]
-
-verfuegbare_zeitfenster = []
-for z in zeiten:
-    t_start_dt = datetime.strptime(z, "%H:%M")
-    t_start = t_start_dt.time()
-    t_ende_dt = t_start_dt + pd.Timedelta(hours=3)
-    t_ende = t_ende_dt.time()
-
-    # Bedingung: Start >= Tagesbeginn und Ende <= Tagesende (am selben Tag)
-    if (slot_start_time <= t_start) and (t_ende_dt.time() <= slot_end_time) and (t_ende_dt.date() == t_start_dt.date()):
-        verfuegbare_zeitfenster.append(f"{t_start.strftime('%H:%M')} - {t_ende.strftime('%H:%M')}")
-
-if not verfuegbare_zeitfenster:
-    st.warning("Keine verfügbaren 3-Stunden-Zeitfenster in diesem Zeitraum.")
+# Gesamtzeitraum (Anzeige)
+row = df_proj[df_proj["Datum"] == datum_auswahl].iloc[0]
+zeitraum_text = str(row["Zeitraum"])
+teil0, teil1 = split_time_range(zeitraum_text)
+slot_start_time = parse_time(teil0)
+slot_end_time = parse_time(teil1)
+if slot_start_time is None or slot_end_time is None:
+    st.error("Ungültiges Zeitformat in 'verfuegbare_zeiten.xlsx' für dieses Datum.")
     st.stop()
 
-zeitfenster_auswahl = st.selectbox("Startzeit (3 Stunden):", verfuegbare_zeitfenster)
+st.info(f"**Gesamter Zeitraum an diesem Tag:** {slot_start_time.strftime('%H:%M')} – {slot_end_time.strftime('%H:%M')} Uhr")
+
+# --- Berechne freie Intervalle (unter Berücksichtigung bereits gebuchter Zeiten) ---
+df_tag = df_buch[(df_buch["Projekt"] == projekt) & (df_buch["Datum"] == datum_auswahl)]
+buchungen = []
+for z in df_tag["Zeitraum"].dropna().astype(str):
+    p0, p1 = split_time_range(z)
+    b_start = parse_time(p0)
+    b_end = parse_time(p1)
+    if b_start and b_end:
+        buchungen.append((b_start, b_end))
+
+freie_slots = freie_zeitfenster(slot_start_time, slot_end_time, buchungen)
+
+# --- Aus freien Slots alle gültigen 3-Stunden-Startzeiten erzeugen ---
+DURATION_HOURS = 3
+dauer_td = pd.Timedelta(hours=DURATION_HOURS)
+
+# Hilfsdatum für Datumsarithmetik (heute reicht)
+today = datetime.today().date()
+
+candidate_starts = []
+for fs_start, fs_end in freie_slots:
+    # Start-DT & End-DT
+    start_dt = datetime.combine(today, fs_start)
+    end_dt = datetime.combine(today, fs_end)
+    # Erlaubte Startzeitpunkte sind solche, für die start_dt + dauer_td <= end_dt
+    cur = start_dt
+    while cur + dauer_td <= end_dt + pd.Timedelta(seconds=0):  # <= erlaubt exakte Passungen
+        # Formatieren als "HH:MM - HH:MM"
+        s = cur.time().strftime("%H:%M")
+        e = (cur + dauer_td).time().strftime("%H:%M")
+        candidate_starts.append(f"{s} - {e}")
+        cur = cur + pd.Timedelta(minutes=15)
+
+# Entfernen von Duplikaten und sortieren
+candidate_starts = sorted(list(dict.fromkeys(candidate_starts)))
+
+if not candidate_starts:
+    st.warning("Keine freien 3-Stunden-Startzeiten verfügbar (an diesem Datum).")
+    st.stop()
+
+# --- Auswahl der Startzeit durch den Benutzer ---
+zeitfenster_auswahl = st.selectbox("Freie Startzeiten (3 Stunden):", candidate_starts)
 zeit_start, zeit_ende = [s.strip() for s in zeitfenster_auswahl.split(" - ")]
 
 # --- Eingabefelder ---
@@ -157,31 +167,57 @@ if st.button("💾 Buchung speichern"):
     if not instrument.strip() or not name.strip():
         st.error("Bitte alle Pflichtfelder ausfüllen.")
     else:
-        zeitraum = f"{zeit_start} - {zeit_ende}"
+        zeitraum_neu = f"{zeit_start} - {zeit_ende}"
         neue_buchung = pd.DataFrame([{
             "Projekt": projekt,
             "Datum": datum_auswahl,
-            "Zeitraum": zeitraum,
+            "Zeitraum": zeitraum_neu,
             "Instrument": instrument.strip(),
             "Name": name.strip()
         }])
 
-        df_buch = pd.concat([df_buch, neue_buchung], ignore_index=True)
+        # Vor dem Speichern prüfen wir optional auf direkte Überschneidung
+        # (Schutz gegen Race-Conditions / Doppelbuchung)
+        # Erneut vorhandene Buchungen für Datum laden
+        df_tag_current = df_buch[(df_buch["Projekt"] == projekt) & (df_buch["Datum"] == datum_auswahl)]
+        conflict = False
+        new_start = parse_time(zeit_start)
+        new_end = parse_time(zeit_ende)
+        if new_start is None or new_end is None:
+            st.error("Interner Fehler beim Parsen der gewählten Zeit.")
+        else:
+            for z in df_tag_current["Zeitraum"].dropna().astype(str):
+                p0, p1 = split_time_range(z)
+                b_start = parse_time(p0)
+                b_end = parse_time(p1)
+                if b_start and b_end:
+                    # Überschneidung: new_start < b_end and new_end > b_start
+                    if (datetime.combine(today, new_start) < datetime.combine(today, b_end)) and \
+                       (datetime.combine(today, new_end) > datetime.combine(today, b_start)):
+                        conflict = True
+                        break
+            if conflict:
+                st.error("Die gewählte Zeit überlappt inzwischen mit einer vorhandenen Buchung. Bitte neu wählen.")
+            else:
+                # Kein Konflikt — speichern
+                df_buch = pd.concat([df_buch, neue_buchung], ignore_index=True)
 
-        # Datum korrekt formatiert speichern
-        df_save = df_buch.copy()
-        if "Datum" in df_save.columns:
-            df_save["Datum"] = df_save["Datum"].apply(format_date_for_excel)
+                # Datum vor dem Schreiben formatieren
+                df_save = df_buch.copy()
+                if "Datum" in df_save.columns:
+                    df_save["Datum"] = df_save["Datum"].apply(format_date_for_excel)
 
-        df_save.to_excel(DATEI_BUCHUNGEN, index=False)
-        st.success(f"Buchung für **{projekt}** am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitraum}) gespeichert!")
+                df_save.to_excel(DATEI_BUCHUNGEN, index=False)
+                st.success(f"Buchung für **{projekt}** am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitraum_neu}) gespeichert!")
 
-# --- Übersicht ---
+# --- Übersicht (Buchungen anzeigen) ---
 st.subheader("📅 Aktuelle Buchungen")
 if not df_buch.empty:
     df_show = df_buch.copy()
     if "Datum" in df_show.columns:
-        df_show["Datum"] = df_show["Datum"].apply(lambda x: x.strftime("%d.%m.%Y") if isinstance(x, (datetime, date)) else x)
+        df_show["Datum"] = df_show["Datum"].apply(
+            lambda x: x.strftime("%d.%m.%Y") if isinstance(x, (datetime, date)) else x
+        )
     st.dataframe(df_show[df_show["Projekt"] == projekt].sort_values(by=["Datum", "Zeitraum"]).reset_index(drop=True))
 else:
     st.write("Keine Buchungen vorhanden.")
