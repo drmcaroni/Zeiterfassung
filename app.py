@@ -133,24 +133,32 @@ slot = st.selectbox(
     slots.apply(lambda x: f"{x['Start'].strftime('%H:%M')} - {x['Ende'].strftime('%H:%M')}", axis=1)
 )
 
-# Generiere 15-Minuten-Slots (Startzeiten), rechne Endzeit = Start + 3h
+# --- 15-Minuten-Startzeiten generieren ---
 zeiten = pd.date_range("00:00", "23:45", freq="15min").strftime("%H:%M").tolist()
+
+# Zeitfenstergrenzen aus Auswahl
 slot_start_time, slot_end_time = [datetime.strptime(x, "%H:%M").time() for x in slot.split(" - ")]
 
+# --- Verfügbare 3-Stunden-Zeitfenster innerhalb des Tageszeitfensters ---
 verfuegbare_zeitfenster = []
 for z in zeiten:
-    t_start = datetime.strptime(z, "%H:%M").time()
-    t_ende = (datetime.strptime(z, "%H:%M") + pd.Timedelta(hours=3)).time()
-    # Start innerhalb Slot und Ende innerhalb Slot
-    if (slot_start_time <= t_start) and (t_ende <= slot_end_time):
-        verfuegbare_zeitfenster.append(f"{z} - {t_ende.strftime('%H:%M')}")
+    t_start_dt = datetime.strptime(z, "%H:%M")
+    t_start = t_start_dt.time()
+    t_ende_dt = t_start_dt + pd.Timedelta(hours=3)
+    t_ende = t_ende_dt.time()
 
-if not verfuegbare_zeitfenster:
-    st.warning("Keine 3-Stunden-Startzeiten in diesem Zeitraum verfügbar.")
-    st.stop()
+    # Bedingungen: Start >= Beginn des Tagesfensters UND Ende <= Ende des Tagesfensters
+    if (slot_start_time <= t_start) and (t_ende_dt.time() <= slot_end_time):
+        # Prüfen, ob das Ende noch am selben Tag liegt
+        if t_ende_dt.date() == t_start_dt.date():
+            verfuegbare_zeitfenster.append(f"{t_start.strftime('%H:%M')} - {t_ende.strftime('%H:%M')}")
 
-zeitfenster_auswahl = st.selectbox("Startzeit (3 Stunden):", verfuegbare_zeitfenster)
-zeit_start, zeit_ende = [s.strip() for s in zeitfenster_auswahl.split(" - ")]
+# Sicherstellen, dass nur Zeiten innerhalb des Slots bleiben
+verfuegbare_zeitfenster = [
+    z for z in verfuegbare_zeitfenster
+    if datetime.strptime(z.split(" - ")[1], "%H:%M").time() <= slot_end_time
+]
+
 
 # Session State initialisieren (vor Widgets, das haben wir oben gemacht für clear flag)
 if "instrument_field" not in st.session_state:
