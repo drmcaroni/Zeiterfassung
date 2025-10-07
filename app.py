@@ -10,7 +10,7 @@ DATEI_VERFUEGBAR = "verfuegbare_zeiten.xlsx"
 
 # === Google Sheets Setup ===
 SHEET_NAME = "buchungen"  # Name deines Google Sheets (nicht der Datei-URL!)
-SHEET_URL = "https://docs.google.com/spreadsheets/d/DEINE_SHEET_ID/edit"  # hier anpassen
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1IwCvK1nssuG6o2fUMnxIIi13MPCSFlHvbsFDvSIlSHE/edit?gid=0#gid=0"  # hier anpassen
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
           "https://www.googleapis.com/auth/drive"]
