@@ -12,7 +12,6 @@ if "clear_after_submit" not in st.session_state:
     st.session_state["clear_after_submit"] = False
 
 # Wenn ein Submit gerade stattgefunden hat, Felder VOR der Widget-Erzeugung zurücksetzen
-# (so vermeiden wir die Streamlit-Fehlermeldung "cannot be modified after the widget ... instantiated")
 if st.session_state.get("clear_after_submit", False):
     st.session_state["instrument_field"] = ""
     st.session_state["name_field"] = ""
@@ -25,7 +24,6 @@ if not os.path.exists(DATEI_BUCHUNGEN):
 # === Verfügbare Zeiten laden ===
 try:
     df_verf = pd.read_excel(DATEI_VERFUEGBAR)
-    # Datum in df_verf als date-Objekte
     df_verf["Datum"] = pd.to_datetime(df_verf["Datum"], dayfirst=True, errors="coerce").dt.date
 except Exception as e:
     st.error(f"Fehler beim Laden von {DATEI_VERFUEGBAR}: {e}")
@@ -34,7 +32,6 @@ except Exception as e:
 # === Buchungen laden ===
 df_buch = pd.read_excel(DATEI_BUCHUNGEN)
 if "Datum" in df_buch.columns:
-    # Versuche, Datum als date zu parsen; falls nicht parsebar -> NaT
     df_buch["Datum"] = pd.to_datetime(df_buch["Datum"], dayfirst=True, errors="coerce").dt.date
 
 # === Hilfsfunktionen ===
@@ -141,8 +138,8 @@ verfuegbare_zeitfenster = []
 for z in zeiten:
     t_start = datetime.strptime(z, "%H:%M").time()
     t_ende = (datetime.strptime(z, "%H:%M") + pd.Timedelta(hours=3)).time()
-    # Start innerhalb Slot und Ende innerhalb Slot
-    if (slot_start_time <= t_start) and (t_ende <= slot_end_time):
+    # Nur Startzeiten berücksichtigen, die exakt 3 Stunden bis zum Ende des Slots passen
+    if (slot_start_time <= t_start) and (t_ende == slot_end_time):
         verfuegbare_zeitfenster.append(f"{z} - {t_ende.strftime('%H:%M')}")
 
 if not verfuegbare_zeitfenster:
@@ -168,10 +165,9 @@ if st.button("💾 Buchung speichern"):
         st.error("Bitte alle Pflichtfelder ausfüllen.")
     else:
         zeitraum = f"{zeit_start} - {zeit_ende}"
-        # Neue Buchung intern mit Datum als date-Objekt
         neue_buchung = pd.DataFrame([{
             "Projekt": projekt,
-            "Datum": datum_auswahl,            # date-Objekt intern behalten
+            "Datum": datum_auswahl,
             "Zeitraum": zeitraum,
             "Instrument": instrument.strip(),
             "Name": name.strip()
@@ -179,12 +175,10 @@ if st.button("💾 Buchung speichern"):
 
         df_buch = pd.concat([df_buch, neue_buchung], ignore_index=True)
 
-        # Bevor wir speichern: Datumsspalte in dd.mm.yyyy Strings konvertieren für Excel
         df_to_save = df_buch.copy()
         if "Datum" in df_to_save.columns:
             df_to_save["Datum"] = df_to_save["Datum"].apply(format_date_for_excel)
 
-        # Schreiben
         df_to_save.to_excel(DATEI_BUCHUNGEN, index=False)
 
         st.success(f"Buchung für **{projekt}** am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitraum}) gespeichert!")
