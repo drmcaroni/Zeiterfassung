@@ -12,7 +12,7 @@ WORKSHEET_NAME = "Buchungen"  # Name des Tabellenblatts
 
 # === Google Sheets Setup ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+creds = Credentials.from_service_account_info(st.secrets["google_service_account"], scopes=scope)
 client = gspread.authorize(creds)
 
 # Versuche, das Tabellenblatt "Buchungen" zu öffnen – oder erstelle es
