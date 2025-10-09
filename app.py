@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -8,6 +8,7 @@ from google.oauth2.service_account import Credentials
 SHEET_NAME = "KUG_Buchungssystem"
 SHEET_ZEITEN = "Zeiten"
 SHEET_BUCHUNGEN = "Buchungen"
+SHEET_FREI = "Freie_Zeiten"
 
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -21,6 +22,13 @@ client = gspread.authorize(creds)
 # === Google Sheets öffnen ===
 sheet_zeiten = client.open(SHEET_NAME).worksheet(SHEET_ZEITEN)
 sheet_buchungen = client.open(SHEET_NAME).worksheet(SHEET_BUCHUNGEN)
+
+# Falls Freie_Zeiten nicht existiert, anlegen
+try:
+    sheet_frei = client.open(SHEET_NAME).worksheet(SHEET_FREI)
+except gspread.WorksheetNotFound:
+    sheet_frei = client.open(SHEET_NAME).add_worksheet(title=SHEET_FREI, rows=100, cols=3)
+    sheet_frei.update("A1:C1", [["Projekt", "Datum", "Zeitraum"]])
 
 # === Daten laden ===
 df_verf = pd.DataFrame(sheet_zeiten.get_all_records())
@@ -61,6 +69,7 @@ def format_date_for_excel(x):
     except:
         return x
 
+
 # === UI ===
 st.title("🎵 KUG Registerproben – Buchungssystem (GS Version)")
 
@@ -87,7 +96,10 @@ for _, row in df_proj.iterrows():
     except:
         continue
 
-    df_tag = df_buch[(df_buch["Projekt"] == projekt) & (pd.to_datetime(df_buch["Datum"], dayfirst=True, errors="coerce").dt.date == datum)]
+    df_tag = df_buch[
+        (df_buch["Projekt"] == projekt)
+        & (pd.to_datetime(df_buch["Datum"], dayfirst=True, errors="coerce").dt.date == datum)
+    ]
     buchungen = []
     for z in df_tag["Zeitraum"].dropna().astype(str):
         try:
@@ -123,7 +135,10 @@ st.info(f"**Gesamtzeitraum an diesem Tag:** {zeit_info}")
 slot_row = df_proj[df_proj["Datum"] == datum_auswahl].iloc[0]
 slot_start_time, slot_end_time = [parse_time(x) for x in str(slot_row["Zeitraum"]).split(" - ")]
 
-df_tag = df_buch[(df_buch["Projekt"] == projekt) & (pd.to_datetime(df_buch["Datum"], dayfirst=True, errors="coerce").dt.date == datum_auswahl)]
+df_tag = df_buch[
+    (df_buch["Projekt"] == projekt)
+    & (pd.to_datetime(df_buch["Datum"], dayfirst=True, errors="coerce").dt.date == datum_auswahl)
+]
 buchungen = []
 for z in df_tag["Zeitraum"].dropna().astype(str):
     try:
@@ -156,17 +171,53 @@ name = st.text_input("Name *")
 if st.button("💾 Buchung speichern"):
     if not projekt or not datum_auswahl or not zeitfenster_auswahl:
         st.warning("Bitte fülle alle Felder aus.")
-    elif not instrument.strip():  # Überprüfen, ob das Instrument-Feld leer ist
+    elif not instrument.strip():
         st.warning("Das Feld 'Instrument *' darf nicht leer sein.")
-    elif not name.strip():  # Überprüfen, ob das Name-Feld leer ist
+    elif not name.strip():
         st.warning("Das Feld 'Name *' darf nicht leer sein.")
     else:
         # Buchung in Google Sheet schreiben
         new_row = [projekt, datum_auswahl.strftime('%d.%m.%Y'), zeitfenster_auswahl, instrument, name]
         sheet_buchungen.append_row(new_row)
-        
+
+        # === NEU: Freie Zeiten automatisch berechnen und speichern ===
+        df_verf = pd.DataFrame(sheet_zeiten.get_all_records())
+        df_buch = pd.DataFrame(sheet_buchungen.get_all_records())
+
+        freie_eintraege = []
+
+        for _, z in df_verf.iterrows():
+            proj = z["Projekt"]
+            dat = z["Datum"]
+            zeitraum = z["Zeitraum"]
+            if not isinstance(zeitraum, str) or "-" not in zeitraum:
+                continue
+            start, ende = [parse_time(x) for x in zeitraum.split("-")]
+            if not start or not ende:
+                continue
+
+            df_b = df_buch[(df_buch["Projekt"] == proj) & (df_buch["Datum"] == dat)]
+            belegte = []
+            for _, b in df_b.iterrows():
+                try:
+                    b_start, b_ende = [parse_time(x) for x in b["Zeitraum"].split("-")]
+                    if b_start and b_ende:
+                        belegte.append((b_start, b_ende))
+                except:
+                    pass
+            freie_slots = freie_zeitfenster(start, ende, belegte)
+            for f_start, f_ende in freie_slots:
+                diff_h = (datetime.combine(datetime.today(), f_ende) - datetime.combine(datetime.today(), f_start)).total_seconds() / 3600
+                if diff_h >= 1:
+                    freie_eintraege.append([proj, dat, f"{f_start.strftime('%H:%M')} - {f_ende.strftime('%H:%M')}"])
+
+        sheet_frei.clear()
+        sheet_frei.update("A1:C1", [["Projekt", "Datum", "Zeitraum"]])
+        if freie_eintraege:
+            sheet_frei.update("A2", freie_eintraege)
+
         st.success(f"Buchung für {projekt} am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitfenster_auswahl}) gespeichert!")
-        st.rerun()  # 🔁 Seite neu laden, damit Übersicht aktualisiert wird
+        st.rerun()
 
 
 # === Übersicht anzeigen ===
