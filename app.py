@@ -154,12 +154,16 @@ instrument = st.text_input("Instrument *")
 name = st.text_input("Name *")
 
 if st.button("💾 Buchung speichern"):
-    if not instrument.strip() or not name.strip():
-        st.error("Bitte alle Pflichtfelder ausfüllen.")
+    if not projekt or not datum_auswahl or not zeitfenster_auswahl:
+        st.warning("Bitte fülle alle Felder aus.")
     else:
-        neue_buchung = [projekt, datum_auswahl.strftime("%d.%m.%Y"), zeitfenster_auswahl, instrument.strip(), name.strip()]
-        sheet_buchungen.append_row(neue_buchung)
+        # Buchung in Google Sheet schreiben
+        new_row = [projekt, datum_auswahl.strftime('%d.%m.%Y'), zeitfenster_auswahl, instrument, name]
+        sheet_buchungen.append_row(new_row)
+        
         st.success(f"Buchung für {projekt} am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitfenster_auswahl}) gespeichert!")
+        st.rerun()  # 🔁 Seite neu laden, damit Übersicht aktualisiert wird
+
 
 # === Übersicht anzeigen ===
 st.subheader("📅 Aktuelle Buchungen (Projekt)")
