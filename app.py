@@ -156,6 +156,10 @@ name = st.text_input("Name *")
 if st.button("💾 Buchung speichern"):
     if not projekt or not datum_auswahl or not zeitfenster_auswahl:
         st.warning("Bitte fülle alle Felder aus.")
+    elif not instrument.strip():  # Überprüfen, ob das Instrument-Feld leer ist
+        st.warning("Das Feld 'Instrument *' darf nicht leer sein.")
+    elif not name.strip():  # Überprüfen, ob das Name-Feld leer ist
+        st.warning("Das Feld 'Name *' darf nicht leer sein.")
     else:
         # Buchung in Google Sheet schreiben
         new_row = [projekt, datum_auswahl.strftime('%d.%m.%Y'), zeitfenster_auswahl, instrument, name]
