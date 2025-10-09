@@ -62,7 +62,7 @@ def format_date_for_excel(x):
         return x
 
 # === UI ===
-st.title("🎵 KUG Registerproben – Buchungssystem (Google Sheets Version)")
+st.title("🎵 KUG Registerproben – Buchungssystem (GS Version)")
 
 if df_verf.empty:
     st.warning("Keine verfügbaren Zeiten gefunden.")
