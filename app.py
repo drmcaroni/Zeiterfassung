@@ -20,8 +20,7 @@ creds = Credentials.from_service_account_info(
 )
 client = gspread.authorize(creds)
 
-sheet_zeiten = client.open(SHEET_NAME).worksheet(SHEET_ZEITEN)
-sheet_buchungen = client.open(SHEET_NAME).worksheet(SHEET_BUCHUNGEN)
+# Falls Sheet nicht existiert → anlegen
 try:
     sheet_frei = client.open(SHEET_NAME).worksheet(SHEET_FREI)
 except gspread.exceptions.WorksheetNotFound:
@@ -30,12 +29,14 @@ except gspread.exceptions.WorksheetNotFound:
 
 # === Caching (verhindert API-Überlastung) ===
 @st.cache_data(ttl=60)
-def lade_sheet(_sheet):
-    """Lädt Daten aus einem Google Sheet und cached sie 60 Sekunden."""
-    return pd.DataFrame(_sheet.get_all_records())
+def lade_sheet(sheet_name):
+    """Lädt Daten aus einem Google Sheet (nach Name) und cached sie 60 Sekunden."""
+    ws = client.open(SHEET_NAME).worksheet(sheet_name)
+    return pd.DataFrame(ws.get_all_records())
 
-df_verf = lade_sheet(sheet_zeiten)
-df_buch = lade_sheet(sheet_buchungen)
+# Daten laden
+df_verf = lade_sheet(SHEET_ZEITEN)
+df_buch = lade_sheet(SHEET_BUCHUNGEN)
 
 # === Helper ===
 def parse_time(t):
@@ -90,8 +91,9 @@ def berechne_freie_zeiten(projekt, datum):
 
     alle = sheet_frei.get_all_records()
     df_frei = pd.DataFrame(alle)
-    mask = ~((df_frei["Projekt"] == projekt) & (df_frei["Datum"] == datum.strftime("%d.%m.%Y")))
-    df_frei = df_frei[mask]
+    if not df_frei.empty:
+        mask = ~((df_frei["Projekt"] == projekt) & (df_frei["Datum"] == datum.strftime("%d.%m.%Y")))
+        df_frei = df_frei[mask]
     neue_df = pd.concat([df_frei, pd.DataFrame(freie_tage)], ignore_index=True)
     sheet_frei.clear()
     sheet_frei.append_row(["Projekt", "Datum", "Zeitraum"])
@@ -197,6 +199,7 @@ if st.button("💾 Buchung speichern"):
         st.warning("Das Feld 'Name *' darf nicht leer sein.")
     else:
         new_row = [projekt, datum_auswahl.strftime('%d.%m.%Y'), zeitfenster_auswahl, instrument, name]
+        sheet_buchungen = client.open(SHEET_NAME).worksheet(SHEET_BUCHUNGEN)
         sheet_buchungen.append_row(new_row)
         time.sleep(1)
 
