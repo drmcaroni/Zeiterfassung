@@ -30,9 +30,9 @@ except gspread.exceptions.WorksheetNotFound:
 
 # === Caching (verhindert API-Überlastung) ===
 @st.cache_data(ttl=60)
-def lade_sheet(sheet):
+def lade_sheet(_sheet):
     """Lädt Daten aus einem Google Sheet und cached sie 60 Sekunden."""
-    return pd.DataFrame(sheet.get_all_records())
+    return pd.DataFrame(_sheet.get_all_records())
 
 df_verf = lade_sheet(sheet_zeiten)
 df_buch = lade_sheet(sheet_buchungen)
@@ -64,7 +64,7 @@ def berechne_freie_zeiten(projekt, datum):
         return []
 
     z_start, z_ende = [parse_time(x) for x in str(df_tag.iloc[0]["Zeitraum"]).split(" - ")]
-    df_b_tag = df_buch[(df_buch["Projekt"] == projekt) & 
+    df_b_tag = df_buch[(df_buch["Projekt"] == projekt) &
                        (pd.to_datetime(df_buch["Datum"], dayfirst=True, errors="coerce").dt.date == datum)]
 
     buchungen = []
@@ -87,18 +87,23 @@ def berechne_freie_zeiten(projekt, datum):
                 "Zeitraum": f"{fs[0].strftime('%H:%M')} - {fs[1].strftime('%H:%M')}"
             })
 
-    # Alte Zeilen für dieses Projekt & Datum löschen
+    # === Google Sheet aktualisieren (effizient) ===
     alle = sheet_frei.get_all_records()
-    df_frei = pd.DataFrame(alle)
+    if alle:
+        df_frei = pd.DataFrame(alle)
+    else:
+        df_frei = pd.DataFrame(columns=["Projekt", "Datum", "Zeitraum"])
+
     mask = ~((df_frei["Projekt"] == projekt) & (df_frei["Datum"] == datum.strftime("%d.%m.%Y")))
     df_frei = df_frei[mask]
 
-    # Neue Zeilen anhängen
     neue_df = pd.concat([df_frei, pd.DataFrame(freie_tage)], ignore_index=True)
+
     sheet_frei.clear()
     sheet_frei.append_row(["Projekt", "Datum", "Zeitraum"])
-    for _, r in neue_df.iterrows():
-        sheet_frei.append_row([r["Projekt"], r["Datum"], r["Zeitraum"]])
+    if not neue_df.empty:
+        sheet_frei.update(f"A2:C{len(neue_df)+1}", neue_df.values.tolist())
+
     return freie_tage
 
 # === UI ===
@@ -201,7 +206,9 @@ if st.button("💾 Buchung speichern"):
         sheet_buchungen.append_row(new_row)
         time.sleep(1)  # leichtes Delay, um Quota nicht zu stressen
 
-        berechne_freie_zeiten(projekt, datum_auswahl)  # ⚙️ nur betroffenen Tag aktualisieren
+        # ⚙️ Nur betroffenen Tag aktualisieren
+        berechne_freie_zeiten(projekt, datum_auswahl)
+
         st.success(f"Buchung für {projekt} am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitfenster_auswahl}) gespeichert!")
         st.rerun()
 
