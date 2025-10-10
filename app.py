@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, time
+from datetime import datetime
 import gspread
 import time
 from google.oauth2.service_account import Credentials
@@ -79,7 +79,8 @@ def berechne_freie_zeiten(projekt, datum):
     freie_slots = freie_zeitfenster(z_start, z_ende, buchungen)
     freie_tage = []
     for fs in freie_slots:
-        diff_h = (datetime.combine(datetime.today(), fs[1]) - datetime.combine(datetime.today(), fs[0])).total_seconds() / 3600
+        diff_h = (datetime.combine(datetime.today(), fs[1]) -
+                  datetime.combine(datetime.today(), fs[0])).total_seconds() / 3600
         if diff_h >= 1:  # nur Slots >= 1h
             freie_tage.append({
                 "Projekt": projekt,
@@ -87,23 +88,15 @@ def berechne_freie_zeiten(projekt, datum):
                 "Zeitraum": f"{fs[0].strftime('%H:%M')} - {fs[1].strftime('%H:%M')}"
             })
 
-    # === Google Sheet aktualisieren (effizient) ===
     alle = sheet_frei.get_all_records()
-    if alle:
-        df_frei = pd.DataFrame(alle)
-    else:
-        df_frei = pd.DataFrame(columns=["Projekt", "Datum", "Zeitraum"])
-
+    df_frei = pd.DataFrame(alle)
     mask = ~((df_frei["Projekt"] == projekt) & (df_frei["Datum"] == datum.strftime("%d.%m.%Y")))
     df_frei = df_frei[mask]
-
     neue_df = pd.concat([df_frei, pd.DataFrame(freie_tage)], ignore_index=True)
-
     sheet_frei.clear()
     sheet_frei.append_row(["Projekt", "Datum", "Zeitraum"])
-    if not neue_df.empty:
-        sheet_frei.update(f"A2:C{len(neue_df)+1}", neue_df.values.tolist())
-
+    for _, r in neue_df.iterrows():
+        sheet_frei.append_row([r["Projekt"], r["Datum"], r["Zeitraum"]])
     return freie_tage
 
 # === UI ===
@@ -143,7 +136,8 @@ for _, row in df_proj.iterrows():
 
     freie_slots = freie_zeitfenster(z_start, z_ende, buchungen)
     for fs in freie_slots:
-        diff_h = (datetime.combine(datetime.today(), fs[1]) - datetime.combine(datetime.today(), fs[0])).total_seconds() / 3600
+        diff_h = (datetime.combine(datetime.today(), fs[1]) -
+                  datetime.combine(datetime.today(), fs[0])).total_seconds() / 3600
         if diff_h >= 3:
             freie_tage.append({"Datum": datum, "Start": fs[0], "Ende": fs[1], "Projekt": projekt})
 
@@ -204,12 +198,11 @@ if st.button("💾 Buchung speichern"):
     else:
         new_row = [projekt, datum_auswahl.strftime('%d.%m.%Y'), zeitfenster_auswahl, instrument, name]
         sheet_buchungen.append_row(new_row)
-        time.sleep(1)  # leichtes Delay, um Quota nicht zu stressen
+        time.sleep(1)
 
-        # ⚙️ Nur betroffenen Tag aktualisieren
         berechne_freie_zeiten(projekt, datum_auswahl)
-
         st.success(f"Buchung für {projekt} am {datum_auswahl.strftime('%d.%m.%Y')} ({zeitfenster_auswahl}) gespeichert!")
+        st.cache_data.clear()
         st.rerun()
 
 # === Übersicht ===
