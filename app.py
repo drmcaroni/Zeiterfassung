@@ -86,26 +86,64 @@ def lade_buchungen(projekt, datum):
 
 
 def berechne_freie_zeiten_und_schreibe_sheet():
+
+    # 🔄 BUCHUNGEN NEU LADEN (WICHTIG!)
+    df_buch_local = pd.DataFrame(sheet_buchungen.get_all_records())
+
     eintraege = []
 
     for _, r in df_zeiten.iterrows():
+
         projekt = r["Projekt"]
-        datum = pd.to_datetime(r["Datum"], dayfirst=True, errors="coerce").date()
+
+        datum = pd.to_datetime(
+            r["Datum"], dayfirst=True, errors="coerce"
+        )
+
         if pd.isna(datum):
             continue
 
+        datum = datum.date()
+
         try:
-            start, ende = [parse_time(x) for x in r["Zeitraum"].split("-")]
+            start, ende = [
+                parse_time(x)
+                for x in str(r["Zeitraum"]).split("-")
+            ]
         except:
             continue
 
-        buchungen = lade_buchungen(projekt, datum)
+        # 🔄 Buchungen mit frischen Daten laden
+        df = df_buch_local[
+            (df_buch_local["Projekt"] == projekt)
+            & (
+                pd.to_datetime(
+                    df_buch_local["Datum"],
+                    dayfirst=True,
+                    errors="coerce"
+                ).dt.date
+                == datum
+            )
+        ]
+
+        buchungen = []
+
+        for z in df["Zeitraum"].dropna().astype(str):
+            try:
+                s, e = [parse_time(x) for x in z.split("-")]
+                if s and e:
+                    buchungen.append((s, e))
+            except:
+                pass
+
         freie = freie_zeitfenster(start, ende, buchungen)
 
         for fs, fe in freie:
             diff_h = (
-                datetime.combine(datum, fe) - datetime.combine(datum, fs)
+                datetime.combine(datum, fe)
+                - datetime.combine(datum, fs)
             ).total_seconds() / 3600
+
             if diff_h >= 1:
                 eintraege.append(
                     [
@@ -117,9 +155,9 @@ def berechne_freie_zeiten_und_schreibe_sheet():
 
     sheet_frei.clear()
     sheet_frei.update("A1:C1", [["Projekt", "Datum", "Zeitraum"]])
+
     if eintraege:
         sheet_frei.update("A2", eintraege)
-
 
 # ==============================
 # UI
@@ -232,3 +270,4 @@ if not df_buch.empty:
     )
 else:
     st.write("Noch keine Buchungen vorhanden.")
+
